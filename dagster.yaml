@@ -1,0 +1,41 @@
+# Dagster Configuration File
+
+# Telemetry
+telemetry:
+  enabled: false
+
+# Run storage (local development)
+run_storage:
+  module: dagster.core.storage.runs
+  class: SqliteRunStorage
+  config:
+    base_dir: /tmp/dagster
+
+# Event log storage (local development)
+event_log_storage:
+  module: dagster.core.storage.event_log
+  class: SqliteEventLogStorage
+  config:
+    base_dir: /tmp/dagster
+
+# Schedule storage (local development)
+schedule_storage:
+  module: dagster.core.storage.schedules
+  class: SqliteScheduleStorage
+  config:
+    base_dir: /tmp/dagster
+
+# Compute logs
+compute_logs:
+  module: dagster.core.storage.local_compute_log_manager
+  class: LocalComputeLogManager
+  config:
+    base_dir: /tmp/dagster/logs
+
+# Local artifact storage
+local_artifact_storage:
+  module: dagster.core.storage.root
+  class: LocalArtifactStorage
+  config:
+    base_dir: /tmp/dagster/artifacts
+

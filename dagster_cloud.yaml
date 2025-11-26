@@ -1,0 +1,32 @@
+# Dagster Cloud Deployment Configuration
+
+locations:
+  - location_name: tax_resolution_medallion
+    code_source:
+      python_file: dagster_pipeline/__init__.py
+    build:
+      directory: .
+      registry: null
+    container_context:
+      k8s:
+        env_vars:
+          - SUPABASE_URL
+          - SUPABASE_KEY
+          - TIPARSER_URL
+          - TIPARSER_API_KEY
+          - CASEHELPER_BASE_URL
+          - CASEHELPER_USERNAME
+          - CASEHELPER_PASSWORD
+          - CASEHELPER_APP_TYPE
+        env_secrets:
+          - name: SUPABASE_KEY
+          - name: TIPARSER_API_KEY
+          - name: CASEHELPER_PASSWORD
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+

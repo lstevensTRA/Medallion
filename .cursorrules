@@ -1,0 +1,1552 @@
+# Tax Resolution Medallion Architecture - Cursor Rules
+
+## 🎯 Project Overview
+
+**Mission:** Build a production-ready Bronze → Silver → Gold medallion architecture for tax resolution data processing using Supabase and Dagster, integrated with existing API endpoints.
+
+**Core Principle:** Build complete, production-ready code with automatic documentation generation at every step. No shortcuts, no TODOs, no "we'll fix it later."
+
+---
+
+## 📋 Project Phases & Documentation Strategy
+
+### Phase 0: Discovery & Foundation
+**Output Document:** `docs/00_DISCOVERY_REPORT.md`
+
+**When you see:** "Analyze the existing codebase"
+**You should:**
+1. Create `docs/` directory if it doesn't exist
+2. Generate `00_DISCOVERY_REPORT.md` with:
+   - Existing tech stack analysis
+   - Current Supabase tables (with schemas)
+   - API client code locations
+   - Sample API response structures
+   - Authentication patterns
+   - Environment variable documentation
+   - Recommended integration points
+
+**Auto-generate section for each discovery:**
+```markdown
+## Discovery: [Component Name]
+**Date:** [Auto-timestamp]
+**Location:** [File path]
+**Finding:** [What we found]
+**Impact:** [How this affects our medallion architecture]
+**Integration Point:** [How we'll connect to it]
+```
+The existing codebase is in /Users/lindseystevens/Medallion/ExistingDocs there is outdated gold schema info but some thigns may be helpful
+Supabase details are here /Users/lindseystevens/Medallion/ExistingDocs/TI Revamp 1.0/supabase
+Original api calls are in here /Users/lindseystevens/Medallion/ExistingDocs/TI Revamp 1.0/tax-sheet-extraction 
+---
+
+### Phase 1: API Response Analysis
+**Output Document:** `docs/01_API_ANALYSIS.md`
+
+**When you see:** Request to analyze an API response
+**You should:**
+1. Ask for the actual JSON response (if not provided)
+2. Create detailed analysis in `01_API_ANALYSIS.md`:
+
+```markdown
+## API: [TiParser AT / TiParser WI / CaseHelper Interview]
+**Analysis Date:** [Auto-timestamp]
+**Endpoint:** [URL]
+**Sample Response:**
+```json
+[Paste actual response here]
+```
+
+### Field Extraction Plan
+| JSON Path | Data Type | Bronze Column | Silver Destination | Gold Destination | Notes |
+|-----------|-----------|---------------|-------------------|------------------|-------|
+| `.response_date` | DATE | response_date | extracted_date | tax_years.response_date | Extract as DATE type |
+| `.data.form` | TEXT | form_number | form_type | account_activity.form_number | Normalize to uppercase |
+
+### Variations Found
+- Field name variations: [List all variations]
+- Data type inconsistencies: [Document issues]
+- Nested structures: [Map hierarchy]
+
+### Trigger Logic Required
+```sql
+-- Extract response_date (handle multiple formats)
+COALESCE(
+  (raw_response->>'response_date')::DATE,
+  (raw_response->'metadata'->>'date')::DATE,
+  CURRENT_DATE
+) as extracted_date
+```
+
+### Business Rules Applied
+- WI Type lookup on `form_type` → determines `is_self_employment`
+- AT Code lookup on `transaction_code` → enriches with `affects_balance`
+```
+```
+
+**Critical:** Before writing ANY trigger, document the extraction logic with examples.
+
+---
+
+### Phase 2: Business Rules Integration
+**Output Document:** `docs/02_BUSINESS_RULES.md`
+
+**When you see:** Creating business rules tables
+**You should:**
+1. Document each rule table in `02_BUSINESS_RULES.md`:
+
+```markdown
+## Rule Table: wi_type_rules
+**Purpose:** Categorize W-2, 1099, and other income forms
+**Source:** AI Glossary spreadsheet (WI Types sheet)
+
+### Schema
+| Column | Type | Purpose | Example |
+|--------|------|---------|---------|
+| form_code | TEXT | Unique identifier | "1099-NEC" |
+| category | TEXT | SE/Non-SE/Neither | "SE" |
+| is_self_employment | BOOLEAN | Affects tax calculations | true |
+
+### Sample Data
+```sql
+INSERT INTO wi_type_rules (form_code, category, is_self_employment) VALUES
+  ('W-2', 'Non-SE', false),
+  ('1099-NEC', 'SE', true),
+  ('1099-MISC', 'SE', true);
+```
+
+### Usage in Silver Triggers
+```sql
+-- Enrich income document with WI type rules
+LEFT JOIN wi_type_rules wtr ON 
+  UPPER(TRIM(new.form_type)) = wtr.form_code
+```
+
+### Test Cases
+- Form "1099-NEC" → is_self_employment = true
+- Form "W-2" → is_self_employment = false
+- Unknown form → defaults handled
+```
+```
+
+---
+
+### Phase 3: Bronze Layer Implementation
+**Output Document:** `docs/03_BRONZE_LAYER.md`
+
+**When you see:** Creating Bronze tables/assets
+**You should:**
+1. Document in `03_BRONZE_LAYER.md`:
+
+```markdown
+## Bronze Layer: Raw API Response Storage
+
+### Table: bronze_at_raw
+**Migration:** `supabase/migrations/002_bronze_tables.sql`
+**Purpose:** Store raw Account Transcript responses from TiParser API
+
+#### Schema
+```sql
+CREATE TABLE bronze_at_raw (
+  bronze_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  case_id UUID NOT NULL REFERENCES cases(case_id),
+  raw_response JSONB NOT NULL,
+  api_source TEXT DEFAULT 'tiparser',
+  inserted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+#### Dagster Asset
+**File:** `dagster_pipeline/assets/bronze_assets.py`
+```python
+@asset(
+    description="Fetch AT data from TiParser and store in Bronze layer"
+)
+def bronze_at_data(context, supabase: SupabaseResource):
+    """
+    Calls TiParser AT endpoint and inserts raw response into bronze_at_raw.
+    
+    Triggers:
+    - insert_bronze_at → silver_tax_years (automatic)
+    
+    Returns:
+    - bronze_id, case_id, record_count
+    """
+    # Implementation here
+```
+
+#### Example API Call
+```bash
+curl -X POST https://tiparser.com/api/at \
+  -H "Authorization: Bearer $API_KEY" \
+  -d '{"case_id": "uuid-here"}'
+```
+
+#### Example Response Stored
+```json
+{
+  "case_id": "uuid-here",
+  "documents": [...],
+  "metadata": {...}
+}
+```
+
+#### Data Flow
+```
+TiParser API → bronze_at_raw (JSONB)
+             ↓
+    [SQL Trigger Fires]
+             ↓
+silver_tax_years (typed columns)
+```
+
+#### Testing
+```python
+def test_bronze_at_insertion():
+    """Test that raw response is stored correctly"""
+    # Test implementation
+```
+```
+
+**Auto-generate for each Bronze table:**
+- Migration SQL with comments
+- Dagster asset with docstrings
+- Test cases
+- Data flow diagram
+- Example data
+
+---
+
+### Phase 4: Silver Layer Implementation
+**Output Document:** `docs/04_SILVER_LAYER.md`
+
+**When you see:** Creating Silver tables/triggers
+**You should:**
+1. Document in `04_SILVER_LAYER.md`:
+
+```markdown
+## Silver Layer: Typed & Enriched Data
+
+### Table: silver_tax_years
+**Migration:** `supabase/migrations/004_silver_tables.sql`
+**Purpose:** Extract and type tax year information from AT responses
+
+#### Schema
+```sql
+CREATE TABLE silver_tax_years (
+  silver_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bronze_id UUID REFERENCES bronze_at_raw(bronze_id),
+  case_id UUID REFERENCES cases(case_id),
+  tax_year TEXT NOT NULL,
+  return_filed TEXT,
+  filing_status TEXT,
+  -- ... all typed columns
+);
+```
+
+#### Trigger: bronze_to_silver_at
+**File:** `supabase/migrations/005_bronze_to_silver_triggers.sql`
+
+```sql
+CREATE OR REPLACE FUNCTION insert_bronze_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Extract tax years from JSONB
+  INSERT INTO silver_tax_years (
+    bronze_id,
+    case_id,
+    tax_year,
+    return_filed
+  )
+  SELECT 
+    NEW.bronze_id,
+    NEW.case_id,
+    -- Handle multiple field name variations
+    COALESCE(
+      doc->>'tax_year',
+      doc->>'taxYear',
+      doc->>'period'
+    ) as tax_year,
+    -- Normalize return_filed values
+    CASE 
+      WHEN UPPER(doc->>'filed') IN ('YES', 'FILED', 'TRUE') THEN 'Filed'
+      WHEN UPPER(doc->>'filed') IN ('NO', 'UNFILED', 'FALSE') THEN 'Unfiled'
+      ELSE 'Unknown'
+    END as return_filed
+  FROM jsonb_array_elements(NEW.raw_response->'documents') doc;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_bronze_at_to_silver
+  AFTER INSERT ON bronze_at_raw
+  FOR EACH ROW
+  EXECUTE FUNCTION insert_bronze_at();
+```
+
+#### Field Extraction Rules
+| Bronze JSON Path | Variations Handled | Silver Column | Data Type | Default |
+|-----------------|-------------------|---------------|-----------|---------|
+| `documents[].tax_year` | tax_year, taxYear, period | tax_year | TEXT | NULL |
+| `documents[].filed` | filed, return_filed, status | return_filed | TEXT | 'Unknown' |
+
+#### Business Rules Applied
+- **WI Type Enrichment:** Join with `wi_type_rules` to set `is_self_employment`
+- **AT Code Enrichment:** Join with `at_transaction_rules` to set `affects_balance`
+
+#### Data Quality Checks
+```sql
+-- Check for unmapped form types
+SELECT DISTINCT form_type 
+FROM silver_income_documents 
+WHERE form_type NOT IN (SELECT form_code FROM wi_type_rules);
+```
+
+#### Testing
+```python
+def test_bronze_to_silver_trigger():
+    """Test automatic transformation from Bronze to Silver"""
+    # Insert into Bronze
+    # Verify Silver populated correctly
+    # Check business rule enrichment
+```
+```
+
+**Auto-generate for each Silver table:**
+- Complete trigger function with all variations
+- Field extraction mapping table
+- Business rule joins
+- Data quality checks
+- Test cases
+
+---
+
+### Phase 5: Gold Layer Implementation
+**Output Document:** `docs/05_GOLD_LAYER.md`
+
+**When you see:** Creating Gold tables/triggers
+**You should:**
+1. Document in `05_GOLD_LAYER.md`:
+
+```markdown
+## Gold Layer: Normalized Business Entities
+
+### Domain: Employment Information
+**Tables:** 
+- `employment_information`
+- `household_information`
+- `financial_accounts`
+
+#### Table: employment_information
+**Migration:** `supabase/migrations/009_gold_normalized_v2_tables.sql`
+**Source:** Silver → `silver_logiqs_flattened`
+
+```sql
+CREATE TABLE employment_information (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  case_id UUID REFERENCES cases(case_id),
+  person_type TEXT CHECK (person_type IN ('taxpayer', 'spouse')),
+  employer_name TEXT,
+  gross_monthly_income DECIMAL(15,2),
+  -- ... semantic columns
+);
+```
+
+#### Trigger: silver_to_gold_employment
+```sql
+CREATE OR REPLACE FUNCTION insert_silver_logiqs()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Extract employment information for taxpayer
+  INSERT INTO employment_information (
+    case_id,
+    person_type,
+    employer_name,
+    gross_monthly_income
+  )
+  VALUES (
+    NEW.case_id,
+    'taxpayer',
+    NEW.raw_response->'employment'->>'b3',  -- Excel B3 = employer
+    (NEW.raw_response->'employment'->>'al7')::DECIMAL  -- Excel AL7 = monthly income
+  );
+  
+  -- Extract employment information for spouse
+  INSERT INTO employment_information (
+    case_id,
+    person_type,
+    employer_name,
+    gross_monthly_income
+  )
+  VALUES (
+    NEW.case_id,
+    'spouse',
+    NEW.raw_response->'employment'->>'c3',  -- Excel C3 = spouse employer
+    (NEW.raw_response->'employment'->>'al8')::DECIMAL  -- Excel AL8 = spouse income
+  );
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+#### Excel → Database Mapping
+| Excel Cell | Description | Gold Table | Gold Column | Notes |
+|-----------|-------------|------------|-------------|-------|
+| B3 | Taxpayer Employer | employment_information | employer_name | person_type='taxpayer' |
+| C3 | Spouse Employer | employment_information | employer_name | person_type='spouse' |
+| AL7 | Taxpayer Monthly Income | employment_information | gross_monthly_income | From calculated field |
+
+#### Semantic Improvements
+**Before (Excel):**
+```sql
+b3 TEXT,  -- What is this?
+c61 TEXT, -- Mystery field
+al7 DECIMAL  -- ???
+```
+
+**After (Gold):**
+```sql
+employer_name TEXT,              -- Clear purpose
+gross_monthly_income DECIMAL,    -- Self-documenting
+employment_start_date DATE       -- Obvious meaning
+```
+
+#### Business Logic Functions
+```sql
+-- Calculate total monthly income (replaces Excel formula)
+CREATE FUNCTION calculate_total_monthly_income(p_case_id UUID)
+RETURNS TABLE (
+  taxpayer_income DECIMAL,
+  spouse_income DECIMAL,
+  total_income DECIMAL
+) AS $$
+  SELECT 
+    COALESCE(SUM(CASE WHEN person_type = 'taxpayer' THEN gross_monthly_income END), 0),
+    COALESCE(SUM(CASE WHEN person_type = 'spouse' THEN gross_monthly_income END), 0),
+    COALESCE(SUM(gross_monthly_income), 0)
+  FROM employment_information
+  WHERE case_id = p_case_id;
+$$ LANGUAGE SQL;
+```
+
+#### Testing
+```python
+def test_silver_to_gold_employment():
+    """Test employment data normalization"""
+    # Insert Silver data
+    # Verify Gold tables populated
+    # Check business function calculations
+```
+```
+
+**Auto-generate for each Gold domain:**
+- Complete normalized schema
+- Excel cell mapping table
+- Trigger functions
+- Business logic functions
+- Before/after comparison
+- Test cases
+
+---
+
+### Phase 6: Dagster Orchestration
+**Output Document:** `docs/06_DAGSTER_ORCHESTRATION.md`
+
+**When you see:** Creating Dagster assets
+**You should:**
+1. Document in `06_DAGSTER_ORCHESTRATION.md`:
+
+```markdown
+## Dagster Orchestration Layer
+
+### Overview
+Dagster orchestrates data flow but does NOT transform data (SQL triggers handle that).
+
+**Dagster's Role:**
+1. Call existing API clients
+2. INSERT into Bronze layer
+3. Monitor Silver/Gold population (triggers do the work)
+4. Expose metadata and lineage
+
+### Asset Graph
+```
+bronze_at_data → silver_tax_years → gold_tax_years
+                                  → gold_account_activity
+                                  → gold_csed_events
+```
+
+### Asset: bronze_at_data
+**File:** `dagster_pipeline/assets/bronze_assets.py`
+
+```python
+@asset(
+    description="Fetch AT data from TiParser and insert into Bronze layer",
+    group_name="bronze",
+    compute_kind="api",
+    metadata={
+        "api_endpoint": "https://tiparser.com/api/at",
+        "triggers": ["insert_bronze_at → silver_tax_years"]
+    }
+)
+def bronze_at_data(
+    context: AssetExecutionContext,
+    supabase: SupabaseResource,
+    tiparser_client: TiParserResource
+) -> Dict[str, Any]:
+    """
+    Fetch AT (Account Transcript) data from TiParser API.
+    
+    Process:
+    1. Get case_id from config
+    2. Call TiParser API (reuse existing client)
+    3. Insert raw JSON into bronze_at_raw
+    4. SQL trigger automatically populates silver_tax_years
+    5. Return metadata about records processed
+    
+    Config:
+        case_id (str): UUID of case to process
+    
+    Returns:
+        Dict with bronze_id, case_id, document_count, silver_records_created
+    
+    Raises:
+        APIError: If TiParser API call fails
+        DatabaseError: If Bronze insertion fails
+    """
+    case_id = context.op_config["case_id"]
+    
+    # 1. Call existing TiParser API client
+    context.log.info(f"Fetching AT data for case {case_id}")
+    at_response = tiparser_client.get_at_analysis(case_id)
+    
+    # 2. Insert into Bronze (trigger fires automatically)
+    result = supabase.client.table('bronze_at_raw').insert({
+        'case_id': case_id,
+        'raw_response': at_response,
+        'api_source': 'tiparser'
+    }).execute()
+    
+    bronze_id = result.data[0]['bronze_id']
+    
+    # 3. Monitor Silver population (check trigger worked)
+    silver_count = supabase.client.table('silver_tax_years') \
+        .select('*', count='exact') \
+        .eq('bronze_id', bronze_id) \
+        .execute()
+    
+    # 4. Return metadata
+    return {
+        "bronze_id": bronze_id,
+        "case_id": case_id,
+        "document_count": len(at_response.get('documents', [])),
+        "silver_records_created": silver_count.count,
+        "timestamp": datetime.now().isoformat()
+    }
+```
+
+### Asset Dependencies
+```python
+@asset(
+    deps=[bronze_at_data, bronze_wi_data, bronze_interview_data]
+)
+def monitor_silver_population(context, supabase):
+    """Monitor that Bronze → Silver triggers are working"""
+    # Check counts match
+    # Alert if discrepancies
+```
+
+### Running Assets
+```bash
+# Materialize single asset
+dagster asset materialize -m dagster_pipeline --select bronze_at_data
+
+# Materialize entire pipeline
+dagster asset materialize -m dagster_pipeline --select "*"
+
+# Materialize for specific case
+dagster asset materialize -m dagster_pipeline \
+  --config '{"ops": {"bronze_at_data": {"config": {"case_id": "uuid-here"}}}}'
+```
+
+### Monitoring & Alerts
+```python
+# Check for failed triggers
+@sensor(job=alert_on_silver_failure)
+def silver_population_sensor(context):
+    """Alert if Bronze inserted but Silver not populated"""
+    # Query for Bronze records without corresponding Silver
+    # Send alert if found
+```
+```
+
+**Auto-generate for each Dagster asset:**
+- Complete docstring
+- Configuration examples
+- Dependency graph
+- Running instructions
+- Monitoring strategy
+
+---
+
+### Phase 7: End-to-End Testing
+**Output Document:** `docs/07_TESTING_STRATEGY.md`
+
+**When you see:** Writing tests
+**You should:**
+1. Document in `07_TESTING_STRATEGY.md`:
+
+```markdown
+## Testing Strategy
+
+### Unit Tests
+
+#### Bronze Layer Tests
+```python
+def test_bronze_at_insertion():
+    """Test raw API response storage"""
+    # Given: Sample AT response
+    sample_response = {
+        "case_id": "test-uuid",
+        "documents": [...]
+    }
+    
+    # When: Insert into Bronze
+    result = supabase.table('bronze_at_raw').insert({
+        'case_id': 'test-uuid',
+        'raw_response': sample_response
+    }).execute()
+    
+    # Then: Verify stored correctly
+    assert result.data[0]['raw_response'] == sample_response
+    assert result.data[0]['case_id'] == 'test-uuid'
+
+def test_bronze_to_silver_trigger():
+    """Test automatic Silver population"""
+    # Given: Bronze record inserted
+    # When: Trigger fires
+    # Then: Silver populated with correct typed data
+    # And: Business rules applied
+```
+
+### Integration Tests
+
+#### End-to-End Flow
+```python
+def test_full_pipeline_bronze_to_gold():
+    """Test complete Bronze → Silver → Gold flow"""
+    # 1. Insert Bronze data
+    # 2. Verify Silver populated (trigger 1)
+    # 3. Verify Gold populated (trigger 2)
+    # 4. Check business logic functions work
+    # 5. Validate data accuracy
+```
+
+### Performance Tests
+
+#### Load Testing
+```python
+def test_100_cases_performance():
+    """Test pipeline with 100 concurrent cases"""
+    # Measure: Total time, Silver population rate, Gold accuracy
+    # Assert: < 5 seconds per case
+```
+
+### Data Quality Tests
+
+#### Validation Queries
+```sql
+-- Test 1: All Bronze has corresponding Silver
+SELECT COUNT(*) FROM bronze_at_raw b
+LEFT JOIN silver_tax_years s ON b.bronze_id = s.bronze_id
+WHERE s.silver_id IS NULL;
+-- Expected: 0
+
+-- Test 2: All Silver has corresponding Gold
+SELECT COUNT(*) FROM silver_tax_years s
+LEFT JOIN gold_tax_years g ON s.silver_id = g.silver_id
+WHERE g.id IS NULL;
+-- Expected: 0
+
+-- Test 3: Business rules applied
+SELECT COUNT(*) FROM silver_income_documents
+WHERE form_type NOT IN (SELECT form_code FROM wi_type_rules);
+-- Expected: 0 (all forms mapped)
+```
+
+### Test Data
+
+#### Sample API Responses
+**File:** `tests/fixtures/sample_at_response.json`
+```json
+{
+  "case_id": "test-case-1",
+  "documents": [...]
+}
+```
+
+**File:** `tests/fixtures/sample_wi_response.json`
+**File:** `tests/fixtures/sample_interview_response.json`
+```
+
+---
+
+### Phase 8: Deployment & Operations
+**Output Document:** `docs/08_DEPLOYMENT_GUIDE.md`
+
+**When you see:** Preparing for production
+**You should:**
+1. Document in `08_DEPLOYMENT_GUIDE.md`:
+
+```markdown
+## Deployment Guide
+
+### Prerequisites
+- Supabase project created
+- Dagster Cloud account (or self-hosted)
+- Environment variables configured
+- API keys secured
+
+### Environment Variables
+```bash
+# Supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-service-role-key
+
+# TiParser API
+TIPARSER_API_URL=https://tiparser.com/api
+TIPARSER_API_KEY=your-api-key
+
+# CaseHelper API
+CASEHELPER_API_URL=https://casehelper.com/api
+CASEHELPER_API_KEY=your-api-key
+
+# Dagster
+DAGSTER_HOME=/opt/dagster/home
+```
+
+### Migration Deployment
+
+#### Step 1: Apply Migrations
+```bash
+# Review migrations
+supabase db diff
+
+# Apply to staging
+supabase db push --db-url $STAGING_DATABASE_URL
+
+# Verify
+supabase db pull --db-url $STAGING_DATABASE_URL
+
+# Apply to production (after testing)
+supabase db push --db-url $PRODUCTION_DATABASE_URL
+```
+
+#### Step 2: Verify Triggers
+```sql
+-- Check all triggers exist
+SELECT 
+  trigger_name,
+  event_object_table,
+  action_statement
+FROM information_schema.triggers
+WHERE trigger_schema = 'public'
+ORDER BY event_object_table, trigger_name;
+
+-- Expected triggers:
+-- trigger_bronze_at_to_silver
+-- trigger_bronze_wi_to_silver
+-- trigger_bronze_interview_to_silver
+-- trigger_silver_to_gold_tax_years
+-- trigger_silver_to_gold_employment
+-- ... etc
+```
+
+#### Step 3: Deploy Dagster
+```bash
+# Build Dagster image
+docker build -t tax-resolution-dagster .
+
+# Deploy to Dagster Cloud
+dagster-cloud deployment deploy \
+  --deployment-name production \
+  --location-name tax_resolution \
+  --code-location-file dagster_cloud.yaml
+
+# Or self-hosted
+docker run -d \
+  -e SUPABASE_URL=$SUPABASE_URL \
+  -e SUPABASE_KEY=$SUPABASE_KEY \
+  tax-resolution-dagster
+```
+
+### Monitoring Setup
+
+#### Supabase Monitoring
+```sql
+-- Create monitoring views
+CREATE VIEW bronze_silver_health AS
+SELECT 
+  'bronze_at_raw' as table_name,
+  COUNT(*) as bronze_count,
+  (SELECT COUNT(*) FROM silver_tax_years WHERE bronze_id IN (SELECT bronze_id FROM bronze_at_raw)) as silver_count,
+  COUNT(*) - (SELECT COUNT(*) FROM silver_tax_years WHERE bronze_id IN (SELECT bronze_id FROM bronze_at_raw)) as missing_silver
+FROM bronze_at_raw;
+
+-- Alert on missing Silver records
+CREATE FUNCTION alert_missing_silver()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF (SELECT missing_silver FROM bronze_silver_health) > 0 THEN
+    -- Send alert (integrate with monitoring tool)
+    RAISE WARNING 'Missing Silver records detected';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+#### Dagster Monitoring
+```python
+# Configure sensors for alerts
+@sensor(job=process_bronze_data)
+def check_api_failures(context):
+    """Monitor for API call failures"""
+    # Check logs for errors
+    # Alert if threshold exceeded
+```
+
+### Rollback Plan
+
+#### Database Rollback
+```bash
+# List migrations
+supabase migration list
+
+# Rollback last migration
+supabase migration down
+
+# Rollback to specific version
+supabase migration down --version 20240115_silver_tables
+```
+
+#### Dagster Rollback
+```bash
+# Revert to previous deployment
+dagster-cloud deployment rollback \
+  --deployment-name production \
+  --target-version previous
+```
+
+### Health Checks
+```bash
+# Check database health
+curl https://your-project.supabase.co/rest/v1/bronze_at_raw?limit=1
+
+# Check Dagster health
+curl http://dagster-host:3000/server_info
+
+# Check trigger functionality
+psql -c "SELECT verify_all_triggers();"
+```
+```
+
+---
+
+## 🎨 Code Generation Standards
+
+### Every SQL Migration Must Include:
+
+```sql
+-- ============================================================================
+-- Migration: [Number]_[name].sql
+-- Purpose: [One-line description]
+-- Dependencies: [List of previous migrations]
+-- Author: Tax Resolution Team
+-- Date: [Auto-timestamp]
+-- ============================================================================
+-- Tables/Triggers Created:
+--   - [list all objects created]
+-- ============================================================================
+-- Rollback:
+--   DROP TRIGGER [trigger_name];
+--   DROP FUNCTION [function_name];
+--   DROP TABLE [table_name];
+-- ============================================================================
+
+-- Table creation
+CREATE TABLE IF NOT EXISTS [table_name] (
+  -- Primary key
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  
+  -- Foreign keys
+  case_id UUID NOT NULL REFERENCES cases(case_id),
+  
+  -- Data columns
+  [column_name] [TYPE] [CONSTRAINTS],
+  
+  -- Metadata
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX idx_[table]_[column] ON [table]([column]);
+
+-- Comments
+COMMENT ON TABLE [table_name] IS '[Detailed description of purpose]';
+COMMENT ON COLUMN [table].[column] IS '[Column purpose and usage]';
+
+-- Trigger function
+CREATE OR REPLACE FUNCTION [function_name]()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- [Step 1: Description]
+  -- [Implementation]
+  
+  -- [Step 2: Description]
+  -- [Implementation]
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger
+CREATE TRIGGER [trigger_name]
+  AFTER INSERT ON [source_table]
+  FOR EACH ROW
+  EXECUTE FUNCTION [function_name]();
+```
+
+### Every Python File Must Include:
+
+```python
+"""
+Module: [filename].py
+Purpose: [One-line description]
+Dependencies: [List imports and their purposes]
+Author: Tax Resolution Team
+Date: [Auto-timestamp]
+
+This module provides:
+- [Functionality 1]
+- [Functionality 2]
+
+Example Usage:
+    ```python
+    from dagster_pipeline.assets import bronze_assets
+    
+    # Materialize AT data
+    result = materialize([bronze_at_data])
+    ```
+
+Architecture Context:
+- Layer: [Bronze/Silver/Gold]
+- Upstream: [Dependencies]
+- Downstream: [What depends on this]
+- Triggers: [SQL triggers this activates]
+"""
+
+from typing import Dict, Any, List, Optional
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+@asset(
+    description="[One-line what this does]",
+    group_name="[bronze/silver/gold]",
+    compute_kind="[api/database/transform]",
+    metadata={
+        "layer": "[bronze/silver/gold]",
+        "source": "[API/database]",
+        "destination": "[table name]",
+        "triggers": ["[trigger_name] → [destination_table]"]
+    }
+)
+def asset_name(
+    context: AssetExecutionContext,
+    resource: ResourceType
+) -> Dict[str, Any]:
+    """
+    [Multi-line description of what this asset does]
+    
+    This asset:
+    1. [Step 1]
+    2. [Step 2]
+    3. [Step 3]
+    
+    Args:
+        context: Dagster execution context with config
+        resource: [Resource description]
+    
+    Config:
+        field_name (type): Description
+    
+    Returns:
+        Dict with:
+        - key1: description
+        - key2: description
+    
+    Raises:
+        ErrorType: When [condition]
+    
+    Example:
+        ```python
+        config = {"case_id": "uuid-here"}
+        result = asset_name.execute_in_process(run_config={"ops": {"asset_name": {"config": config}}})
+        ```
+    """
+    # Implementation with inline comments
+    logger.info(f"Starting {asset_name.__name__}")
+    
+    try:
+        # [Step 1 description]
+        result = do_thing()
+        
+        # [Step 2 description]
+        processed = process_result(result)
+        
+        return {
+            "success": True,
+            "data": processed
+        }
+    except Exception as e:
+        logger.error(f"Error in {asset_name.__name__}: {e}")
+        raise
+```
+
+### Every Test File Must Include:
+
+```python
+"""
+Test Module: test_[component].py
+Purpose: Tests for [component description]
+Author: Tax Resolution Team
+Date: [Auto-timestamp]
+
+Test Coverage:
+- Unit tests: [list]
+- Integration tests: [list]
+- Data quality tests: [list]
+"""
+
+import pytest
+from fixtures import sample_at_response, sample_wi_response
+
+class TestBronzeLayer:
+    """Tests for Bronze layer data ingestion"""
+    
+    def test_bronze_at_insertion(self, supabase_client, sample_at_response):
+        """
+        Test: Bronze AT data stored correctly
+        
+        Given: Sample AT API response
+        When: Inserted into bronze_at_raw
+        Then: 
+        - Record stored with correct structure
+        - bronze_id generated
+        - timestamp recorded
+        """
+        # Given
+        case_id = "test-case-1"
+        
+        # When
+        result = supabase_client.table('bronze_at_raw').insert({
+            'case_id': case_id,
+            'raw_response': sample_at_response
+        }).execute()
+        
+        # Then
+        assert len(result.data) == 1
+        assert result.data[0]['case_id'] == case_id
+        assert result.data[0]['raw_response'] == sample_at_response
+        assert 'bronze_id' in result.data[0]
+        assert 'inserted_at' in result.data[0]
+    
+    def test_bronze_to_silver_trigger(self, supabase_client, sample_at_response):
+        """
+        Test: Bronze → Silver trigger fires correctly
+        
+        Given: AT data inserted into Bronze
+        When: Trigger processes data
+        Then:
+        - Silver tax_years populated
+        - Business rules applied
+        - Field types correct
+        """
+        # Test implementation
+```
+
+---
+
+## 🔄 Automatic Documentation Generation
+
+### When Creating Any Component:
+
+1. **Update the phase document** (e.g., `03_BRONZE_LAYER.md`)
+2. **Add to architecture diagram** (update ASCII art)
+3. **Document data flow** (source → trigger → destination)
+4. **Include example data** (real JSON structures)
+5. **List test cases** (what we're testing)
+
+### Document Structure for Each Component:
+
+```markdown
+## Component: [Name]
+**Type:** [Table/Trigger/Asset/Function]
+**Layer:** [Bronze/Silver/Gold]
+**Status:** ✅ Complete | 🚧 In Progress | ⏸️ Planned
+
+### Purpose
+[One-line description]
+
+### Dependencies
+- Upstream: [What this needs]
+- Downstream: [What needs this]
+
+### Implementation
+**File:** `[path/to/file]`
+```[language]
+[Complete code with comments]
+```
+
+### Example Data
+**Input:**
+```json
+[Sample input]
+```
+
+**Output:**
+```json
+[Sample output]
+```
+
+### Data Flow
+```
+[Source] → [Process] → [Destination]
+         ↓
+    [Side Effects]
+```
+
+### Testing
+- [ ] Unit test: [test name]
+- [ ] Integration test: [test name]
+- [ ] Data quality: [validation check]
+
+### Deployment Notes
+- Migration: `[filename].sql`
+- Rollback: `[rollback command]`
+- Monitoring: `[what to watch]`
+```
+
+---
+
+## 🚨 Critical Rules
+
+### Before Writing ANY Code:
+
+1. ✅ **Analyze the API response** (if not done) → Document in `01_API_ANALYSIS.md`
+2. ✅ **Map extraction logic** → Document field variations and COALESCE logic
+3. ✅ **Identify business rules** → Document lookups and joins
+4. ✅ **Design trigger** → Document transformation steps
+5. ✅ **Write tests** → Document test cases
+6. ✅ **Generate docs** → Update phase document
+
+### Before Committing ANY Code:
+
+1. ✅ All docstrings complete
+2. ✅ All SQL comments in place
+3. ✅ Phase document updated
+4. ✅ Tests written and passing
+5. ✅ Examples included
+6. ✅ No TODOs or FIXMEs (create GitHub issues instead)
+
+### Documentation Requirements:
+
+**For Every Table:**
+- Purpose statement
+- Schema with column comments
+- Sample data
+- Indexes explanation
+- Related triggers
+
+**For Every Trigger:**
+- Input structure (Bronze JSONB)
+- Extraction logic (COALESCE for variations)
+- Business rule joins
+- Output structure (Silver/Gold typed columns)
+- Test cases
+
+**For Every Dagster Asset:**
+- Complete docstring
+- Config parameters
+- Return value structure
+- Error handling
+- Example usage
+
+**For Every Function:**
+- Purpose and use case
+- Input parameters
+- Return value
+- Example SQL call
+- Test cases
+
+---
+
+## 📊 Progress Tracking
+
+### Update Progress Document: `docs/00_PROGRESS.md`
+
+```markdown
+# Implementation Progress
+
+## Phase 0: Discovery ✅
+- [x] Analyzed existing codebase
+- [x] Documented tech stack
+- [x] Listed existing tables
+- [x] Found API clients
+- **Document:** `docs/00_DISCOVERY_REPORT.md`
+
+## Phase 1: API Analysis ✅
+- [x] TiParser AT response analyzed
+- [x] TiParser WI response analyzed
+- [x] CaseHelper Interview response analyzed
+- [x] Field extraction plan documented
+- **Document:** `docs/01_API_ANALYSIS.md`
+
+## Phase 2: Business Rules 🚧
+- [x] WI type rules table
+- [ ] AT transaction rules table
+- [ ] CSED rules table
+- [ ] Status definitions table
+- **Document:** `docs/02_BUSINESS_RULES.md`
+
+## Phase 3: Bronze Layer ⏸️
+- [ ] bronze_at_raw table
+- [ ] bronze_wi_raw table
+- [ ] bronze_interview_raw table
+- [ ] Dagster bronze assets
+- **Document:** `docs/03_BRONZE_LAYER.md`
+
+[Continue for all phases...]
+
+## Current Sprint Focus
+**Phase:** [Current phase]
+**Task:** [Current task]
+**Blocker:** [None/Description]
+**Next:** [What's next]
+
+## Documentation Status
+| Document | Status | Last Updated |
+|----------|--------|--------------|
+| 00_DISCOVERY_REPORT.md | ✅ Complete | 2024-01-15 |
+| 01_API_ANALYSIS.md | ✅ Complete | 2024-01-16 |
+| 02_BUSINESS_RULES.md | 🚧 In Progress | 2024-01-17 |
+| ... | ... | ... |
+```
+
+---
+
+## 🎯 Next Steps Prompt Template
+
+### When Completing a Phase:
+
+```markdown
+Phase [X] Complete: [Phase Name]
+
+**Completed:**
+- ✅ [List all completed items]
+
+**Documents Generated:**
+- 📄 `docs/0X_[PHASE_NAME].md` (updated)
+- 📄 `supabase/migrations/00X_*.sql` (if applicable)
+- 📄 `dagster_pipeline/assets/*.py` (if applicable)
+- 📄 `tests/test_*.py` (if applicable)
+
+**Data Flow Validated:**
+```
+[Source] → [Process] → [Destination]
+```
+
+**Tests Passing:**
+- ✅ Unit tests: X/X
+- ✅ Integration tests: X/X
+- ✅ Data quality: X/X
+
+**Ready for Next Phase?**
+- [ ] All docs updated
+- [ ] All tests passing
+- [ ] Code reviewed
+- [ ] Ready to proceed
+
+**Start Phase [X+1]?**
+```
+
+---
+
+## 💡 Integration with Existing Code
+
+### Finding Existing Patterns:
+
+**When you see:** "Analyze existing API client"
+**You should:**
+
+```markdown
+## Existing API Client Analysis
+
+### Location
+**File:** `[path/to/api/client.py]`
+**Function:** `[function_name]`
+
+### Current Implementation
+```python
+[Paste existing code]
+```
+
+### Authentication Pattern
+```python
+headers = {
+    'Authorization': f'Bearer {API_KEY}',
+    'Content-Type': 'application/json'
+}
+```
+
+### Response Structure
+```python
+response = {
+    'data': [...],
+    'metadata': {...}
+}
+```
+
+### Integration Plan
+**Reuse in Dagster:**
+```python
+@asset
+def bronze_at_data(context, existing_api_client):
+    """Reuse existing API client for Bronze ingestion"""
+    response = existing_api_client.get_at_data(case_id)
+    # Insert into Bronze
+```
+
+**No Changes Needed:**
+- ✅ API client works as-is
+- ✅ Authentication pattern preserved
+- ✅ Response structure understood
+
+**Modifications Required:**
+- ⚠️ [List any changes needed]
+- ⚠️ [Reason for changes]
+```
+
+---
+
+## 🎓 Learning & Improvement
+
+### After Each Phase, Document:
+
+```markdown
+## Phase Retrospective: [Phase Name]
+
+### What Went Well
+- [Positive outcomes]
+
+### Challenges Encountered
+- [Issues faced]
+- [How resolved]
+
+### Lessons Learned
+- [Key learnings]
+
+### Improvements for Next Phase
+- [Changes to process]
+- [Better approaches]
+
+### Technical Debt Created
+- [List any shortcuts]
+- [Plan to address]
+```
+
+---
+
+## 📞 When to Ask for Help
+
+### You Should Request Input When:
+
+1. **API Response Unclear**
+   - "The API response structure is ambiguous. I need a sample response to proceed."
+   - Include: What field you're trying to extract, what you've tried
+
+2. **Business Rule Needed**
+   - "I need clarification on the business rule for [scenario]."
+   - Include: Current understanding, specific question
+
+3. **Data Quality Issue**
+   - "Found inconsistent data: [description]. How should this be handled?"
+   - Include: Example data, proposed solutions
+
+4. **Performance Concern**
+   - "This trigger is slow with large datasets. Should we optimize now or later?"
+   - Include: Benchmark results, alternative approaches
+
+5. **Architecture Decision**
+   - "Two approaches possible: A) [approach], B) [approach]. Recommendation?"
+   - Include: Pros/cons of each
+
+### Format for Questions:
+
+```markdown
+## Question: [Short title]
+**Context:** [Phase/component]
+**Priority:** [High/Medium/Low]
+
+### Current Situation
+[What you know]
+
+### Question
+[Specific question]
+
+### What I've Tried
+- [Attempt 1]
+- [Attempt 2]
+
+### Proposed Solutions
+1. [Option A]: [Pros/Cons]
+2. [Option B]: [Pros/Cons]
+
+### Recommendation
+[Your suggestion if you have one]
+
+### Blocking?
+[Yes/No - can you proceed with other work while waiting?]
+```
+
+---
+
+## 🎬 Starting a New Session
+
+### First Message of Each Session:
+
+```markdown
+## Session Start: [Date]
+
+### Last Completed
+**Phase:** [X]
+**Document:** `docs/0X_[NAME].md`
+**Status:** [Complete/In Progress]
+
+### Current Sprint
+**Working On:** [Component name]
+**Goal:** [What we're building]
+**Document:** `docs/0X_[NAME].md`
+
+### Session Goals
+1. [Goal 1]
+2. [Goal 2]
+3. [Goal 3]
+
+### Questions/Blockers
+- [Any outstanding questions]
+- [Any blockers from previous session]
+
+### Ready to Continue
+[Yes/No - if no, what's needed?]
+```
+
+---
+
+## ✅ Definition of Done
+
+### For Each Component:
+
+**Code Complete When:**
+- [ ] Implementation matches specification
+- [ ] All docstrings complete
+- [ ] All comments in place
+- [ ] No TODOs or FIXMEs
+- [ ] Follows project patterns
+
+**Tests Complete When:**
+- [ ] Unit tests written and passing
+- [ ] Integration tests written and passing
+- [ ] Data quality checks written and passing
+- [ ] Edge cases covered
+- [ ] Test coverage >80%
+
+**Documentation Complete When:**
+- [ ] Phase document updated
+- [ ] Architecture diagram updated
+- [ ] Example data included
+- [ ] Data flow documented
+- [ ] Deployment notes added
+
+**Phase Complete When:**
+- [ ] All components implemented
+- [ ] All tests passing
+- [ ] All documentation complete
+- [ ] Code reviewed
+- [ ] Ready for next phase
+
+---
+
+## 🚀 Quick Reference Commands
+
+### Supabase Commands
+```bash
+# Create new migration
+supabase migration new [name]
+
+# Apply migrations locally
+supabase db push
+
+# Pull current schema
+supabase db pull
+
+# See differences
+supabase db diff
+
+# Reset local database
+supabase db reset
+```
+
+### Dagster Commands
+```bash
+# Start Dagster dev server
+dagster dev
+
+# Materialize single asset
+dagster asset materialize -m dagster_pipeline --select [asset_name]
+
+# Materialize all
+dagster asset materialize -m dagster_pipeline --select "*"
+
+# Run tests
+pytest dagster_pipeline/tests/
+```
+
+### Documentation Commands
+```bash
+# Generate from template
+cp docs/templates/PHASE_TEMPLATE.md docs/0X_NEW_PHASE.md
+
+# Check documentation structure
+tree docs/
+
+# Validate markdown
+markdownlint docs/
+```
+
+---
+
+## 🎯 Remember
+
+1. **Document BEFORE Code** - Plan in the phase doc, then implement
+2. **Test DURING Code** - Write tests as you build
+3. **Review AFTER Code** - Check completeness before moving on
+4. **Ask WHEN Stuck** - Better to ask than guess
+5. **Learn ALWAYS** - Document lessons and improvements
+
+---
+
+**This is a living document. Update it as the project evolves.**
