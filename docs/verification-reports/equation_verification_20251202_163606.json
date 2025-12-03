@@ -1,0 +1,48 @@
+{
+  "verification_date": "2025-12-02T16:36:03.884142",
+  "cases_checked": [
+    "54820",
+    "1117461",
+    "1206374"
+  ],
+  "equation_chunks": {
+    "chunk_1_csed": {
+      "chunk_name": "CSED Calculations",
+      "sub_equations": {
+        "1.1_base_csed": {
+          "status": "\u2705",
+          "has_return_filed_date_column": true,
+          "has_base_csed_date_column": true,
+          "notes": []
+        },
+        "1.2_bankruptcy_tolling": {
+          "status": "\u26a0\ufe0f",
+          "has_csed_tolling_events_table": true,
+          "has_bankruptcy_codes": false,
+          "notes": [],
+          "cases_with_bankruptcy": 0
+        },
+        "1.3_oic_tolling": {
+          "status": "\u26a0\ufe0f",
+          "note": "To be verified - check for codes 480, 481, 482, 483"
+        },
+        "1.4_cdp_tolling": {
+          "status": "\u26a0\ufe0f",
+          "note": "To be verified - check for code 971"
+        },
+        "1.5_penalty_tolling": {
+          "status": "\u26a0\ufe0f",
+          "note": "To be verified - check for codes 276, 196"
+        }
+      },
+      "cases_tested": 0,
+      "cases_passed": 0,
+      "cases_failed": 0,
+      "errors": []
+    }
+  },
+  "missing_functions": [],
+  "missing_tables": [],
+  "calculation_errors": [],
+  "summary": {}
+}
